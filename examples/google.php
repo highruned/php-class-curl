@@ -4,9 +4,10 @@ require_once("../src/curl.php");
 
 $session = new curl();
 
-$session->set_url("http://google.com/");
+$m1 = new curl_request();
+$m1->set_url("http://google.com/");
 
-$r1 = $session->run(); // returns a curl_response object
+$r1 = $session->run($m1); // returns a curl_response object
 
 echo $r1->status_code;
 
