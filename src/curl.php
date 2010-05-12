@@ -4,9 +4,10 @@ class curl_request
 {
 	public $options;
 
-	public function __construct()
+	public function __construct($default = true)
 	{
-		$this->set_default();
+		if($default)
+			$this->set_default();
 	}
 
 	public function set_default()
@@ -27,6 +28,11 @@ class curl_request
 			$this->options[$key] = $value;
 	}
 
+	public function set_option($key, $value)
+	{
+		$this->options[$key] = $value;
+	}
+
 	public function get_options()
 	{
 		return $this->options;
@@ -40,6 +46,16 @@ class curl_request
 			$this->options[CURLOPT_SSL_VERIFYPEER] = false;
 	}
 
+	public function set_referer($url)
+	{
+		$this->options[CURLOPT_REFERER] = $url;
+	}
+
+	public function enable_redirects()
+	{
+		$this->options[CURLOPT_FOLLOWLOCATION] = true;
+	}
+
 	public function set_authentication($username, $password)
 	{
 		$this->options[CURLOPT_USERPWD] = $username . ':' . $password;
@@ -49,19 +65,25 @@ class curl_request
 	public function set_cookies($file_path)
 	{
 		// clear the cookies
-		fclose(fopen($file_path, 'w'));
+		//fclose(fopen($file_path, 'w'));
 	
 		$this->options[CURLOPT_COOKIEJAR] = $file_path;
 		$this->options[CURLOPT_COOKIEFILE] = $file_path;
 	}
 
-	public function set_proxy($proxy_ip, $proxy_port, $proxy_username, $proxy_password)
+	public function set_proxy($type, $host, $port, $username = NULL, $password = NULL)
 	{
-		$this->options[CURLOPT_PROXYTYPE] = CURLPROXY_HTTP;
-		$this->options[CURLOPT_PROXY] = $proxy_ip . ":" . $proxy_port;
+		if($type == "http")
+			$this->options[CURLOPT_PROXYTYPE] = CURLPROXY_HTTP;
+		else if($type == "socks4")
+			$this->options[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS5;
+		else if($type == "socks5")
+			$this->options[CURLOPT_PROXYTYPE] = CURLPROXY_SOCKS5;
+
+		$this->options[CURLOPT_PROXY] = $host . ":" . $port;
 	
-		if(isset($proxy_username) && isset($proxy_password))
-			$this->options[CURLOPT_PROXYUSERPWD] = $proxy_username . ":" . $proxy_password;
+		if($username && $password)
+			$this->options[CURLOPT_PROXYUSERPWD] = $username . ":" . $password;
 	}
 
 	public function set_post($data)
@@ -77,11 +99,18 @@ class curl_request
 		$this->options[CURLOPT_POST] = false;
 		$this->options[CURLOPT_POSTFIELDS] = '';
 	}
+
+	public function set_header($data)
+	{
+		$this->options[CURLOPT_HEADER] = true;
+		$this->options[CURLOPT_HTTPHEADER] = $data;
+	}
 };
 
 class curl_response
 {
 	public $data;
+	public $request;
 	public $info;
 	public $status_code;
 
@@ -90,6 +119,7 @@ class curl_response
 		$this->data = '';
 		$this->info = '';
 		$this->status_code = 0;
+		$this->request = NULL;
 	}
 }
 
@@ -99,10 +129,11 @@ class curl
 	{
 		$this->settings = array("max_connections" => 10);
 		$this->connections = array();
-		$this->mc = curl_multi_init();
 		$this->active = false;
 		$this->timeout = 15;
 		$this->active = true;
+
+		$this->mc = curl_multi_init();
 	}
 
 	public function run(&$request, $callback = NULL)
@@ -113,11 +144,11 @@ class curl
 			curl_setopt($c, $key, $value);
 
 		// we've got a callback so let's go asynchronous
-		if($callback != NULL)
+		if($callback)
 		{
 			$this->connection_list[$c] = array();
 
-			//$this->connection_list[$c]['request'] = $request;
+			$this->connection_list[$c]['request'] = $request;
 			$this->connection_list[$c]['handle'] = $c;
 			$this->connection_list[$c]['callback'] = $callback;
 
@@ -136,10 +167,16 @@ class curl
 			$r->data = curl_exec($c);
 			ob_end_clean();
 
+			$r->request = $request;
+			$r->info = curl_getinfo($c);
 			$r->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
+
+			curl_close($c);
 
 			return $r;
 		}
+
+		$this->last_request = $request;
 	}
 
 	public function update()
@@ -165,22 +202,35 @@ class curl
 
 			unset($this->connection_list[$c]);
 
-			$r= new curl_response();
-			$r->data = $d;
-			$r->info = $i;
-			$r->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
+			$response = new curl_response();
+			$response->request = $connection['request'];
+			$response->data = $d;
+			$response->info = $i;
+			$response->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
+
+			$this->last_response = $response;
 
 			if($connection['callback'] != NULL)
 				if(phpversion() >= 5.3)
-					$connection['callback']($r);
+					$connection['callback']($response);
 				else
-					call_user_func_array($connection['callback'], array($r));
+					call_user_func_array($connection['callback'], array($response));
 
 			usleep(20000);
 		}
 		
 		if(count($this->connection_list) == 0)
 			$this->active = false;
+	}
+
+	public function get_last_request()
+	{
+		return $this->last_request;
+	}
+
+	public function get_last_response()
+	{
+		return $this->last_response;
 	}
 
 	public function get()
@@ -193,6 +243,8 @@ class curl
 	protected $active;
 	protected $connection_list;
 	protected $timeout;
+	protected $last_request;
+	protected $last_response;
 }
 
 ?>
