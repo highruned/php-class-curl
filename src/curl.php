@@ -22,6 +22,12 @@ class curl_request
 		$this->options[CURLOPT_MAXREDIRS] = 4;
 	}
 
+	public function set_timeout($timeout)
+	{
+		$this->options[CURLOPT_CONNECTTIMEOUT] = $timeout;
+		$this->options[CURLOPT_TIMEOUT] = $timeout;
+	}
+
 	public function set_options($options)
 	{
 		foreach($options as $key => $value)
@@ -113,6 +119,7 @@ class curl_response
 	public $request;
 	public $info;
 	public $status_code;
+	public $header_list;
 
 	public function __construct()
 	{
@@ -132,6 +139,9 @@ class curl
 		$this->active = false;
 		$this->timeout = 15;
 		$this->active = true;
+		$this->job_list = array();
+
+		$this->config_connection_max = 20;
 
 		$this->mc = curl_multi_init();
 	}
@@ -146,15 +156,7 @@ class curl
 		// we've got a callback so let's go asynchronous
 		if($callback)
 		{
-			$this->connection_list[$c] = array();
-
-			$this->connection_list[$c]['request'] = $request;
-			$this->connection_list[$c]['handle'] = $c;
-			$this->connection_list[$c]['callback'] = $callback;
-
-			curl_multi_add_handle($this->mc, $c);
-
-			$this->active = true;
+			$this->job_list[] = array("request" => $request, "handle" => $c, "callback" => $callback);
 
 			return false;
 		}
@@ -163,6 +165,24 @@ class curl
 		{
 			$r = new curl_response();
 
+			$header_list = array();
+
+			curl_setopt($c, CURLOPT_HEADERFUNCTION, function($c, $header) use(&$header_list)
+			{
+				if(strstr($header, ":"))
+				{
+					$h = explode(":", $header);
+
+					$key = $h[0];
+
+					array_shift($h);
+
+					$header_list[$key] = implode(":", $h);
+				}
+
+				return strlen($header);
+			});
+
 			ob_start();
 			$r->data = curl_exec($c);
 			ob_end_clean();
@@ -170,6 +190,7 @@ class curl
 			$r->request = $request;
 			$r->info = curl_getinfo($c);
 			$r->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
+			$r->header_list = $header_list;
 
 			curl_close($c);
 
@@ -181,6 +202,17 @@ class curl
 
 	public function update()
 	{
+		while(count($this->connection_list) < $this->config_connection_max && count($this->job_list) > 0)
+		{
+			$job = array_shift($this->job_list);
+
+			$this->connection_list[$job['handle']] = array("request" => $job['request'], "handle" => $job['handle'], "callback" => $job['callback']);
+
+			curl_multi_add_handle($this->mc, $job['handle']);
+
+			$this->active = true;
+		}
+
 		if(!$this->active)
 			return;
 
@@ -190,23 +222,23 @@ class curl
 
 		while($item = curl_multi_info_read($this->mc))
 		{
-			$c = $item['handle'];
+			$handle = $item['handle'];
 
-			$connection = $this->connection_list[$c];
+			$connection = $this->connection_list[$handle];
 		
-			$i = curl_getinfo($c);
+			$info = curl_getinfo($handle);
 
-			$d = curl_multi_getcontent($c);
+			$data = curl_multi_getcontent($handle);
 
-			curl_multi_remove_handle($this->mc, $c);
+			curl_multi_remove_handle($this->mc, $handle);
 
-			unset($this->connection_list[$c]);
+			unset($this->connection_list[$handle]);
 
 			$response = new curl_response();
 			$response->request = $connection['request'];
-			$response->data = $d;
-			$response->info = $i;
-			$response->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
+			$response->data = $data;
+			$response->info = $info;
+			$response->status_code = curl_getinfo($handle, CURLINFO_HTTP_CODE);
 
 			$this->last_response = $response;
 
