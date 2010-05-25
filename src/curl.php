@@ -39,6 +39,14 @@ class curl_request
 		$this->options[$key] = $value;
 	}
 
+	public function get_option($key)
+	{
+		if(!isset($this->options[$key]))
+			return NULL;
+
+		return $this->options[$key];
+	}
+
 	public function get_options()
 	{
 		return $this->options;
@@ -127,6 +135,7 @@ class curl_response
 		$this->info = '';
 		$this->status_code = 0;
 		$this->request = NULL;
+		$this->header_list = array();
 	}
 }
 
@@ -134,19 +143,14 @@ class curl
 {
 	public function __construct()
 	{
-		$this->settings = array("max_connections" => 10);
-		$this->connections = array();
-		$this->active = false;
-		$this->timeout = 15;
-		$this->active = true;
+		$this->setting_list = array("active" => true, "max_connections" => 10);
+		$this->connection_list = array();
 		$this->job_list = array();
-
-		$this->config_connection_max = 20;
 
 		$this->mc = curl_multi_init();
 	}
 
-	public function run(&$request, $callback = NULL)
+	public function run($request, $callback = NULL)
 	{
 		$c = curl_init();
 
@@ -157,8 +161,6 @@ class curl
 		if($callback)
 		{
 			$this->job_list[] = array("request" => $request, "handle" => $c, "callback" => $callback);
-
-			return false;
 		}
 		// nope, no asio for us today
 		else
@@ -202,23 +204,48 @@ class curl
 
 	public function update()
 	{
-		while(count($this->connection_list) < $this->config_connection_max && count($this->job_list) > 0)
+		if(!$this->setting_list['active'])
+			return;
+
+		while(count($this->connection_list) < $this->setting_list['max_connections'] && count($this->job_list) > 0)
 		{
 			$job = array_shift($this->job_list);
+
+			$host = $job['request']->get_option(CURLOPT_URL);
+
+			if(strpos($host, "http") !== 0)
+				$job['request']->set_option(CURLOPT_URL, "http://" . $host);
+
+			$host = parse_url($job['request']->get_option(CURLOPT_URL), PHP_URL_HOST);
+
+			// check if the domain is bad and will block multicurl
+			if(!$this->is_host_active($host))
+			{
+				$response = new curl_response();
+				$response->request = $job['request'];
+				$response->data = '';
+				$response->info = array();
+				$response->status_code = 666;
+
+				if($job['callback'] != NULL)
+					if(phpversion() >= 5.3)
+						$job['callback']($response);
+					else
+						call_user_func_array($job['callback'], array($response));
+
+				continue;
+			}
 
 			$this->connection_list[$job['handle']] = array("request" => $job['request'], "handle" => $job['handle'], "callback" => $job['callback']);
 
 			curl_multi_add_handle($this->mc, $job['handle']);
-
-			$this->active = true;
 		}
 
-		if(!$this->active)
-			return;
+		while(($status = curl_multi_exec($this->mc, $running)) == CURLM_CALL_MULTI_PERFORM)
+			usleep(20000);
 
-		while(($status = curl_multi_exec($this->mc, $running)) == CURLM_CALL_MULTI_PERFORM) usleep(20000);
-		
-		if($status != CURLM_OK) break; 
+		if($status != CURLM_OK)
+			return;
 
 		while($item = curl_multi_info_read($this->mc))
 		{
@@ -248,11 +275,23 @@ class curl
 				else
 					call_user_func_array($connection['callback'], array($response));
 
-			usleep(20000);
+			usleep(5000);
 		}
-		
-		if(count($this->connection_list) == 0)
-			$this->active = false;
+	}
+
+	public function is_host_active($host)
+	{
+		// if this isn't linux don't check it
+		if(!stristr(PHP_OS, "linux"))
+			return true;
+
+		// if this is an IP don't check it
+		if(long2ip(ip2long($host)) == $host)
+			return true;
+
+		$x1 = shell_exec("nslookup " . $host);
+
+		return !stristr($x1, "find");
 	}
 
 	public function get_last_request()
@@ -265,16 +304,26 @@ class curl
 		return $this->last_response;
 	}
 
+	public function set_setting_list($setting_list)
+	{
+		foreach($setting_list as $name => $value)
+			$this->setting_list[$name] = $value;
+	}
+
+	public function set_setting($name, $value)
+	{
+		$this->setting_list[$name] = $value;
+	}
+
 	public function get()
 	{
 		return $this->mc;
 	}
 
-	protected $settings;
+	protected $setting_list;
 	protected $mc;
-	protected $active;
-	protected $connection_list;
-	protected $timeout;
+	public $connection_list;
+	public $job_list;
 	protected $last_request;
 	protected $last_response;
 }
