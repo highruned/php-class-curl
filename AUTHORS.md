@@ -1,8 +1,7 @@
-Current Maintainers: 
+### Current Maintainers
 Eric Muyser <eric.muyser@gmail.com>
 
-Original Designer:
+### Original Designer
 Eric Muyser <eric.muyser@gmail.com>
 
-Contributors:
-
+### Contributors
