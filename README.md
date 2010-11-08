@@ -1,5 +1,5 @@
 # php-class-curl
-This is a basic class to easily manage curl connections. 
+This is a few basic classes to easily manage curl connections. 
 
 libcurl comes with multi-threading built in, which is called multicurl. This class also provides that functionality as an option.
 
