@@ -1,4 +1,4 @@
-<?php
+<?
 
 class curl_request
 {
@@ -16,8 +16,8 @@ class curl_request
 		$this->options[CURLOPT_FOLLOWLOCATION] = false;
 		$this->options[CURLOPT_HEADER] = false;
 		$this->options[CURLOPT_USERAGENT] = "Mozilla/5.0 (Windows; U; Windows NT 5.2; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7";
-		$this->options[CURLOPT_CONNECTTIMEOUT] = 60;
-		$this->options[CURLOPT_TIMEOUT] = 60;
+		$this->options[CURLOPT_CONNECTTIMEOUT] = 15;
+		$this->options[CURLOPT_TIMEOUT] = 15;
 		$this->options[CURLOPT_CUSTOMREQUEST] = "GET";
 		$this->options[CURLOPT_MAXREDIRS] = 4;
 	}
@@ -114,6 +114,13 @@ class curl_request
 		$this->options[CURLOPT_POSTFIELDS] = '';
 	}
 
+	public function set_head()
+	{
+		$this->options[CURLOPT_CUSTOMREQUEST] = "HEAD";
+		$this->options[CURLOPT_POST] = false;
+		$this->options[CURLOPT_POSTFIELDS] = '';
+	}
+
 	public function set_header($data)
 	{
 		$this->options[CURLOPT_HEADER] = true;
@@ -132,7 +139,7 @@ class curl_response
 	public function __construct()
 	{
 		$this->data = '';
-		$this->info = '';
+		$this->info = array();
 		$this->status_code = 0;
 		$this->request = NULL;
 		$this->header_list = array();
@@ -143,7 +150,7 @@ class curl
 {
 	public function __construct()
 	{
-		$this->setting_list = array("active" => true, "max_connections" => 10);
+		$this->setting_list = array("active" => true, "max_connections" => 30);
 		$this->connection_list = array();
 		$this->job_list = array();
 
@@ -169,7 +176,8 @@ class curl
 
 			$header_list = array();
 
-			curl_setopt($c, CURLOPT_HEADERFUNCTION, function($c, $header) use(&$header_list)
+			if(phpversion() >= 5.3)
+			curl_setopt($c, CURLOPT_HEADERFUNCTION, function($c, $header) use(&$r)
 			{
 				if(strstr($header, ":"))
 				{
@@ -179,7 +187,7 @@ class curl
 
 					array_shift($h);
 
-					$header_list[$key] = implode(":", $h);
+					$r->header_list[$key] = implode(":", $h);
 				}
 
 				return strlen($header);
@@ -192,7 +200,6 @@ class curl
 			$r->request = $request;
 			$r->info = curl_getinfo($c);
 			$r->status_code = curl_getinfo($c, CURLINFO_HTTP_CODE);
-			$r->header_list = $header_list;
 
 			curl_close($c);
 
@@ -223,8 +230,6 @@ class curl
 			{
 				$response = new curl_response();
 				$response->request = $job['request'];
-				$response->data = '';
-				$response->info = array();
 				$response->status_code = 666;
 
 				if($job['callback'] != NULL)
@@ -275,12 +280,15 @@ class curl
 				else
 					call_user_func_array($connection['callback'], array($response));
 
-			usleep(5000);
+			usleep(20000);
 		}
 	}
 
 	public function is_host_active($host)
 	{
+		if(!$host)
+			return false;
+			
 		// if this isn't linux don't check it
 		if(!stristr(PHP_OS, "linux"))
 			return true;
@@ -291,7 +299,7 @@ class curl
 
 		$x1 = shell_exec("nslookup " . $host);
 
-		return !stristr($x1, "find");
+		return !stristr($x1, " find");
 	}
 
 	public function get_last_request()
@@ -327,5 +335,3 @@ class curl
 	protected $last_request;
 	protected $last_response;
 }
-
-?>
