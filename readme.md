@@ -20,5 +20,5 @@ Helpful methods and commonly needed data.
 
 ### curl
 
-Service which processed requests and returns responses.
+Service which processed requests and returns responses.  
 
