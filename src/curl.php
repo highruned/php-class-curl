@@ -140,7 +140,7 @@ class curl {
 
 	public function run($request, $callback = null) {
 		$c = curl_init();
-var_dump($request);
+
 		foreach($request->get_options() as $key => $value)
 			curl_setopt($c, $key, $value);
 
